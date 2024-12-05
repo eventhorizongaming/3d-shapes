@@ -1,5 +1,6 @@
 {
   "dependencies": {
-    "pixi.js": "^7.4.2"
+    "pixi.js": "^7.4.2",
+    "ray-triangle-intersection": "^1.0.3"
   }
 }

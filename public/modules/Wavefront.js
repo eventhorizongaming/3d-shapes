@@ -1,6 +1,11 @@
+import { vec } from "./Vector.js";
+import { Triangle } from "./Triangle.js";
+
+/**
+ * Important to note: make sure the model is triangulated and no faces are clipping
+ */
 export class Wavefront {
   geometricVertices = [];
-  normalVertices = [];
   faces = [];
 
   constructor(instructions) {
@@ -10,43 +15,28 @@ export class Wavefront {
       if (instruction.startsWith('v ')) {
         const values = instruction.split(' ');
 
-        this.geometricVertices.push({
-          x: Number(values[1]),
-          y: Number(values[2]),
-          z: Number(values[3]),
-          w: Number(values[4])
-        });
-      } else if (instruction.startsWith('vn ')) {
-        const values = instruction.split(' ');
-
-        this.normalVertices.push({
-          x: Number(values[1]),
-          y: Number(values[2]),
-          z: Number(values[3])
-        });
+        this.geometricVertices.push(vec(values[1], values[2], values[3]));
       }
     }
 
-    // Parse the faces/materials
+    // Parse the triangles/materials
     let currentMaterial;
 
     for (let instruction of instructions) {
       if (instruction.startsWith('f ')) {
         const vertices = instruction.split(' ').slice(1);
-        const points = {vertices: [], material: currentMaterial};
+        const points = [];
 
         for (let vertex of vertices) {
           const pointData = vertex.split('/').map(e => Number(e));
-          const newPoint = {vertex: this.geometricVertices[pointData[0] - 1]};
-
-          if (pointData[2]) {
-            newPoint.normal = this.normalVertices[pointData[2] - 1];
-          }
-          
-          points.vertices.push(newPoint);
+          points.push(this.geometricVertices[pointData[0] - 1]);
         }
 
-        this.faces.push(points);
+        const triangle = new Triangle(points[0], points[1], points[2]);
+
+        triangle.material = currentMaterial;
+
+        this.faces.push(triangle);
       } else if (instruction.startsWith('usemtl ')) {
         currentMaterial = instruction.split(' ')[1];
       }
@@ -55,64 +45,42 @@ export class Wavefront {
     console.log(this.faces);
   }
 
-  rotate2D(x, y, r) {
-    const l = Math.hypot(x, y);
-    const a = Math.atan2(y, x) + r;
-
-    x = Math.sin(a) * l;
-    y = Math.cos(a) * l;
-
-    return {x: x, y: y};
-  }
-
-  rotatePoint(point, rotation) {
-    rotation = {x: rotation.x, y: rotation.y, z: rotation.z}
-    // We use YXZ rotation order
-
-    const pt = {x: point.x, y: point.y, z: point.z};
-
-    const yr = this.rotate2D(pt.x, pt.z, rotation.y);
-    pt.x = yr.x;
-    pt.z = yr.y;
-
-    const xr = this.rotate2D(pt.y, pt.z, rotation.x);
-    pt.y = xr.x;
-    pt.z = xr.y;
-
-    const zr = this.rotate2D(pt.y, pt.x, rotation.z);
-    pt.y = zr.x;
-    pt.x = zr.y;
-
-    return pt;
+  transformTriangle(triangle, transform) {
+    triangle = triangle.clone();
+    triangle.rotate(transform.rotation);
+    triangle.applyDepth(transform.fov);
+    return triangle;
   }
 
   draw(graphics, frame) {
-    const r = 2;
+    const rotation = vec(0, frame / 10, 0);
+    const fov = Math.PI / 4;
+    const transform = { rotation, fov };
+
+    const faces = this.faces
+      .map(e => this.transformTriangle(e.clone(), transform))
+      .sort((a, b) => a.inFrontOf(b));
 
     graphics.clear();
     graphics.lineStyle(1, 0xff0000, 1);
     graphics.endFill();
-    
 
-    const rotation = {x: frame / 10, y: frame / 10, z: 0};
+    for (let face of faces) {
 
-    for (let face of this.faces) {
-      const verts = face.vertices;
+      if (!face.isBackFace()) {
+        const startPoint = face.vertices.at(-1);
+        graphics.moveTo(startPoint.x * 240, startPoint.y * 240);
+        graphics.lineStyle(1, 0xff0000, 1);
+        graphics.beginFill(face.getNormal().normalHex());
 
-      const startPoint = this.rotatePoint(verts.at(-1).vertex, rotation);
-      graphics.moveTo(startPoint.x * 240, startPoint.y * 240);
+        for (let vert of face.vertices) {
+          const point = vert;
+          graphics.lineTo(point.x * 240, point.y * 240);
+        }
 
-      for (let vert of verts) {
-        const point = this.rotatePoint(vert.vertex, rotation);
-        graphics.lineTo(point.x * 240, point.y * 240);
+        graphics.closePath();
+        graphics.endFill();
       }
-    }
-
-    graphics.beginFill(0xffffff);
-
-    for (let pt of this.geometricVertices) {
-      pt = this.rotatePoint(pt, rotation);
-      graphics.drawCircle(pt.x * 240, pt.y * 240, r);
     }
   }
 
